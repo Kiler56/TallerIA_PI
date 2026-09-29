@@ -8,6 +8,11 @@ import matplotlib
 import io
 import urllib, base64
 
+import os
+import numpy as np
+from dotenv import load_dotenv, find_dotenv
+from openai import OpenAI
+
 def home(request):
     #return HttpResponse('<h1>Welcome to Home Page</h1>')
     #return render(request, 'home.html')
@@ -123,3 +128,47 @@ def generate_bar_chart(data, xlabel, ylabel):
     buffer.close()
     graphic = base64.b64encode(image_png).decode('utf-8')
     return graphic
+
+
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
+def recommend(request):
+    prompt = request.GET.get('prompt')
+    best_movie = None
+    max_similarity = None
+    error = None
+
+    if prompt:
+        try:
+            load_dotenv(find_dotenv('openAI.env'))
+            api_key = os.environ.get('gemini_apikey') or os.environ.get('openai_apikey')
+            client = OpenAI(
+                api_key=api_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            )
+            response = client.embeddings.create(
+                input=[prompt],
+                model="gemini-embedding-001",
+                dimensions=1536
+            )
+            prompt_emb = np.array(response.data[0].embedding, dtype=np.float32)
+
+            for movie in Movie.objects.all():
+                movie_emb = np.frombuffer(movie.emb, dtype=np.float32)
+                if movie_emb.shape[0] != prompt_emb.shape[0]:
+                    continue
+                sim = cosine_similarity(prompt_emb, movie_emb)
+                if max_similarity is None or sim > max_similarity:
+                    max_similarity = sim
+                    best_movie = movie
+        except Exception as e:
+            error = str(e)
+
+    return render(request, 'recommend.html', {
+        'prompt': prompt,
+        'movie': best_movie,
+        'similarity': max_similarity,
+        'error': error,
+    })
